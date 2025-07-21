@@ -43,6 +43,7 @@ interface IPost extends mongoose.Document {
   autor: string;
   data: string;
   comentarios: IComentario[];
+  curtidas: number;
 }
 
 // 7. Criar os Schemas do Mongoose
@@ -57,8 +58,12 @@ const postSchema = new mongoose.Schema({
   titulo: { type: String, required: true },
   conteudoHTML: { type: String, required: true },
   autor: { type: String, default: 'Ely Miranda' },
-  data: { type: String, default: '08/04/2025' },
-  comentarios: [comentarioSchema]
+  data: { type: String, default: () => {
+    const now = new Date();
+    return now.toLocaleDateString('pt-BR');
+  }},
+  comentarios: [comentarioSchema],
+  curtidas: { type: Number, default: 0 } 
 });
 
 const Post = mongoose.model<IPost>('Post', postSchema);
@@ -66,7 +71,11 @@ const Post = mongoose.model<IPost>('Post', postSchema);
 // 8. Criar as Rotas da API com Tipos
 app.get('/api/posts', async (req: Request, res: Response) => {
   try {
-    const posts = await Post.find({});
+    const filtro: any = {};
+    if (req.query.autor) {
+      filtro.autor = req.query.autor;
+    }
+    const posts = await Post.find(filtro);
     res.json(posts);
   } catch (err) {
     res.status(500).json({ message: 'Erro ao buscar postagens', error: err });
@@ -80,6 +89,7 @@ app.post('/api/posts', async (req: Request, res: Response) => {
             id_secao: req.body.id_secao,
             titulo: req.body.titulo,
             conteudoHTML: req.body.conteudoHTML,
+            autor: req.body.autor
         });
         await novoPost.save();
         res.status(201).json(novoPost);
@@ -90,24 +100,44 @@ app.post('/api/posts', async (req: Request, res: Response) => {
 
 app.post('/api/posts/:postId/comments', async (req: Request, res: Response) => {
     try {
-        const post = await Post.findById(req.params.postId);
-
-        if (!post) {
-            return res.status(404).json({ message: 'Post não encontrado' });
-        }
-
-        const novoComentario = {
-            autor: req.body.autor,
-            texto: req.body.texto
-        };
-
-        post.comentarios.push(novoComentario as any);
-        await post.save();
-
-        res.status(201).json(post);
+        const { autor, texto } = req.body;
+        const novoComentario = { autor, texto, data: new Date() };
+        const post = await Post.findByIdAndUpdate(
+            req.params.postId,
+            { $push: { comentarios: novoComentario } },
+            { new: true }
+        );
+        if (!post) return res.status(404).json({ message: 'Post não encontrado' });
+        // Retorna apenas o último comentário adicionado
+        res.status(201).json(post.comentarios[post.comentarios.length - 1]);
     } catch (err) {
-        console.error("Erro ao adicionar comentário:", err);
         res.status(500).json({ message: 'Erro ao adicionar comentário', error: err });
+    }
+});
+
+// Rota para curtir um post
+app.post('/api/posts/:postId/like', async (req: Request, res: Response) => {
+    try {
+        const post = await Post.findByIdAndUpdate(
+            req.params.postId,
+            { $inc: { curtidas: 1 } },
+            { new: true }
+        );
+        if (!post) return res.status(404).json({ message: 'Post não encontrado' });
+        res.json({ curtidas: post.curtidas });
+    } catch (err) {
+        res.status(500).json({ message: 'Erro ao curtir o post', error: err });
+    }
+});
+
+// Rota para deletar um post
+app.delete('/api/posts/:postId', async (req: Request, res: Response) => {
+    try {
+        const post = await Post.findByIdAndDelete(req.params.postId);
+        if (!post) return res.status(404).json({ message: 'Post não encontrado' });
+        res.json({ message: 'Post deletado com sucesso' });
+    } catch (err) {
+        res.status(500).json({ message: 'Erro ao deletar o post', error: err });
     }
 });
 
